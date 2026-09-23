@@ -7,6 +7,10 @@ docker compose up --build          # либо
 PYTHONPATH=src .venv/bin/python -m uvicorn pdguard.main:app --port 8000
 ```
 
+Самый простой способ — страница **`/demo`** (на стенде: https://alfa-pd-guard.onrender.com/demo):
+введите текст, нажмите «Замаскировать», затем «Восстановить из маски»; там же
+кнопка «Подставить ловушку» и цепочка через LLM. Всё ниже — те же проверки через `curl`.
+
 Готовый скрипт со всеми сценариями сразу: `./demo/demo.sh`
 
 ---

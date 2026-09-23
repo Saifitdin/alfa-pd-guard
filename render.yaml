@@ -1,33 +1,39 @@
 # Blueprint для Render: New → Blueprint → выбрать этот репозиторий.
 #
-# Один воркер с хранилищем в памяти: демаскирование по payload_id корректно
-# без Redis, пока процесс один. Для нескольких инстансов нужен Redis и общий
-# PDGUARD_STORE_KEY — см. docker-compose.yml.
+# Конфигурация под 1000 RPS: план Pro Plus (4 vCPU), четыре воркера uvicorn и
+# Key Value (Redis) как общее хранилище соответствий. Несколько воркеров без
+# Redis запускать нельзя — прямой и обратный запрос по одному payload_id
+# попадут в разные процессы; сервис на такой связке откажется стартовать.
+#
+# Замер на starter (0,5 vCPU, один воркер, память) упирался в ~350 RPS — см. README.
+# Дешёвый вариант для просмотра без нагрузки: plan: starter, WEB_CONCURRENCY=1,
+# PDGUARD_STORE_BACKEND=memory, сервис Key Value не нужен.
 services:
   - type: web
     name: alfa-pd-guard
     runtime: docker
-    plan: starter
+    plan: pro plus
     region: frankfurt
     healthCheckPath: /health
     envVars:
+      - key: WEB_CONCURRENCY
+        value: "4"
       - key: PDGUARD_STORE_BACKEND
-        value: memory
+        value: redis
+      - key: PDGUARD_REDIS_URL
+        fromService:
+          type: keyvalue
+          name: alfa-pd-guard-kv
+          property: connectionString
+      # Общий ключ AES-GCM для всех воркеров: base64 ровно на 32 байта.
+      # Сгенерировать и вставить в панели Render:
+      #   python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"
+      - key: PDGUARD_STORE_KEY
+        sync: false
       - key: PDGUARD_LOG_FORMAT
         value: json
       - key: PDGUARD_LLM_TIMEOUT
         value: "60"
-      # Масштабирование до 1000 RPS: план standard (2+ vCPU), Key Value (Redis)
-      # и несколько воркеров. Замеры на starter упираются в ~350 RPS — см. README.
-      #   plan: standard
-      #   - key: WEB_CONCURRENCY
-      #     value: "2"
-      #   - key: PDGUARD_STORE_BACKEND
-      #     value: redis
-      #   - key: PDGUARD_REDIS_URL
-      #     fromService: {type: keyvalue, name: alfa-pd-guard-kv, property: connectionString}
-      #   - key: PDGUARD_STORE_KEY
-      #     generateValue: true
       # Ключ AlfaGen задаётся в панели Render как секрет, не в репозитории.
       - key: PDGUARD_LLM_URL
         sync: false
@@ -35,3 +41,14 @@ services:
         sync: false
       - key: PDGUARD_LLM_MODEL
         sync: false
+
+  # Хранилище соответствий. Записи живут 15 минут (PDGUARD_STORE_TTL_SECONDS);
+  # прогон жюри на 1000 RPS в течение 5 минут — это ~150 тысяч записей, около
+  # 100 МБ: план starter (256 МБ) достаточен, free (25 МБ) — нет.
+  # allkeys-lru: при переполнении уходят самые старые пары, а не падают записи.
+  - type: keyvalue
+    name: alfa-pd-guard-kv
+    plan: starter
+    region: frankfurt
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # доступ только из приватной сети Render

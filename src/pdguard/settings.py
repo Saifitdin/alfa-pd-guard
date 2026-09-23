@@ -9,6 +9,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def worker_count() -> int:
+    """Число процессов uvicorn: он сам берёт его из WEB_CONCURRENCY."""
+    try:
+        return int(os.getenv("WEB_CONCURRENCY", "1"))
+    except ValueError:
+        return 1
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:

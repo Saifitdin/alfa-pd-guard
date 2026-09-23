@@ -248,10 +248,23 @@ class RedisStore(MappingStore):
         await self._client.aclose()
 
 
+def effective_backend(store: MappingStore) -> str:
+    """Что реально работает, а не что просили в настройках.
+
+    Разница возникает при откате на память из-за недоступного Redis; /health
+    и лог старта должны показывать именно факт.
+    """
+    return "memory" if isinstance(store, MemoryStore) else "redis"
+
+
 async def build_store(
     backend: str, cipher: Cipher, ttl_seconds: int, redis_url: str | None
 ) -> MappingStore:
-    """Создаёт хранилище, с откатом на память при недоступном Redis."""
+    """Создаёт хранилище, с откатом на память при недоступном Redis.
+
+    Откат безопасен только для одного процесса — при нескольких воркерах
+    его перехватывает проверка на старте в main.py.
+    """
     if backend == "redis":
         if not redis_url:
             raise ValueError("Для бэкенда redis требуется PDGUARD_REDIS_URL")

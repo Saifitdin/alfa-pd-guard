@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -13,10 +12,10 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pdguard.api import admin, demo, ops, process
 from pdguard.api.deps import AppState
 from pdguard.core.pipeline import MaskingPipeline
-from pdguard.core.store import Cipher, MemoryStore, build_store
+from pdguard.core.store import Cipher, MemoryStore, build_store, effective_backend
 from pdguard.obs import metrics
 from pdguard.obs.logging import configure_logging
-from pdguard.settings import Settings
+from pdguard.settings import Settings, worker_count
 
 log = logging.getLogger("pdguard")
 
@@ -29,17 +28,21 @@ async def lifespan(app: FastAPI):
     configure_logging(settings.log_level, settings.log_format)
 
     pipeline = MaskingPipeline(settings.config_dir, settings.data_dir)
-    _refuse_multiworker_memory_store(settings)
+    _refuse_multiworker_memory_store(settings.store_backend, configured=settings.store_backend)
     # Общее хранилище означает несколько процессов: эфемерный ключ там
     # недопустим, иначе воркеры не прочитают записи друг друга.
     cipher = Cipher(allow_ephemeral=settings.store_backend != "redis")
     store = await build_store(settings.store_backend, cipher, settings.store_ttl_seconds, settings.redis_url)
+    # build_store при недоступном Redis откатывается на память — для одного
+    # процесса это допустимо, для нескольких превращается в ту же тихую порчу.
+    _refuse_multiworker_memory_store(effective_backend(store), configured=settings.store_backend)
 
     app.state.pdguard = AppState(settings=settings, pipeline=pipeline, store=store)
     log.info(
         "Сервис запущен",
         extra={
-            "store_backend": type(store).__name__,
+            "store_backend": effective_backend(store),
+            "workers": worker_count(),
             "encryption": cipher.enabled,
             "systems": len(pipeline.policies.all_systems()),
             "pd_types": len(pipeline.policies.titles),
@@ -54,26 +57,32 @@ async def lifespan(app: FastAPI):
         await store.close()
 
 
-def _refuse_multiworker_memory_store(settings: Settings) -> None:
+def _refuse_multiworker_memory_store(backend: str, *, configured: str) -> None:
     """Несколько воркеров с хранилищем в памяти ломают демаскирование молча.
 
     Uvicorn берёт число воркеров из WEB_CONCURRENCY — именно так масштабируют
     сервис на Render и в Kubernetes. Прямой и обратный запрос по одному
     payload_id попадут в разные процессы, и обратный вернёт не то, причём без
     единой ошибки в логах. Лучше отказать на старте с понятным объяснением.
+    Вызывается дважды: по настройкам и по фактически поднятому хранилищу —
+    второй раз ловит откат на память при недоступном Redis.
     """
-    raw = os.getenv("WEB_CONCURRENCY", "1")
-    try:
-        workers = int(raw)
-    except ValueError:
-        workers = 1
-    if workers > 1 and settings.store_backend == "memory":
+    workers = worker_count()
+    if workers <= 1 or backend != "memory":
+        return
+    if configured == "redis":
         raise RuntimeError(
-            f"WEB_CONCURRENCY={workers}, а PDGUARD_STORE_BACKEND=memory: воркеры не "
-            "видят записи друг друга, демаскирование будет возвращать чужие или пустые "
-            "результаты. Задайте PDGUARD_STORE_BACKEND=redis, PDGUARD_REDIS_URL и общий "
-            "PDGUARD_STORE_KEY, либо оставьте один воркер."
+            f"WEB_CONCURRENCY={workers}, а Redis по PDGUARD_REDIS_URL недоступен: откат на "
+            "память одного процесса допустим только для одного воркера, иначе демаскирование "
+            "будет возвращать чужие или пустые результаты. Проверьте адрес Redis или "
+            "оставьте один воркер."
         )
+    raise RuntimeError(
+        f"WEB_CONCURRENCY={workers}, а PDGUARD_STORE_BACKEND=memory: воркеры не "
+        "видят записи друг друга, демаскирование будет возвращать чужие или пустые "
+        "результаты. Задайте PDGUARD_STORE_BACKEND=redis, PDGUARD_REDIS_URL и общий "
+        "PDGUARD_STORE_KEY, либо оставьте один воркер."
+    )
 
 
 async def _sweep_loop(store) -> None:

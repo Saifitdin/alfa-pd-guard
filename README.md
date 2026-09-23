@@ -70,12 +70,15 @@ docker compose up --build
 клиент получает таймауты. Для проверяющей системы это опасно: ответ дольше 10 с
 считается неответом, пять неответов подряд останавливают прогон.
 
-**Что нужно для прогона на 1000 RPS.** Инстанс с двумя и более vCPU
-(на Render — план Standard) и несколько воркеров:
+**Что нужно для прогона на 1000 RPS.** Инстанс с четырьмя vCPU (на Render —
+план Pro Plus; ориентир — 300–400 RPS на воркер) и воркер на каждый vCPU.
+`render.yaml` в репозитории описывает именно эту конфигурацию:
 
-1. Redis: на Render — Key Value, в `PDGUARD_REDIS_URL` его internal URL.
-2. `PDGUARD_STORE_BACKEND=redis` и общий `PDGUARD_STORE_KEY` (32 байта base64).
-3. `WEB_CONCURRENCY=2` (или больше по числу vCPU) — uvicorn подхватит.
+1. Redis: на Render — Key Value (план starter, 256 МБ), в `PDGUARD_REDIS_URL`
+   его internal URL — в Blueprint подставляется автоматически.
+2. `PDGUARD_STORE_BACKEND=redis` и общий `PDGUARD_STORE_KEY` (32 байта base64,
+   задаётся в панели как секрет).
+3. `WEB_CONCURRENCY=4` — uvicorn подхватит без правки команды запуска.
 
 Без Redis несколько воркеров запускать нельзя: прямой и обратный запрос по
 одному `payload_id` попадут в разные процессы. Сервис на такой конфигурации

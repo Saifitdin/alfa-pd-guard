@@ -11,9 +11,36 @@ from pdguard.settings import Settings
 from conftest import ROOT
 
 
-def _settings(backend: str) -> Settings:
+UNREACHABLE_REDIS = "redis://127.0.0.1:1/0"  # порт 1 закрыт — отказ соединения мгновенный
+
+
+def _settings(backend: str, redis_url: str | None = None) -> Settings:
     return Settings(config_dir=ROOT / "config", data_dir=ROOT / "data",
-                    log_format="plain", store_backend=backend)
+                    log_format="plain", store_backend=backend, redis_url=redis_url)
+
+
+def test_multiple_workers_with_unreachable_redis_refuse_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Настроен Redis, но он недоступен: откат на память в каждом воркере дал бы
+    те же чужие результаты — на четырёх воркерах три четверти восстановлений
+    возвращали маску. Отказ на старте вместо этого."""
+    monkeypatch.setenv("WEB_CONCURRENCY", "4")
+    monkeypatch.setenv("PDGUARD_STORE_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    with pytest.raises(RuntimeError, match="Redis по PDGUARD_REDIS_URL недоступен"):
+        with TestClient(create_app(_settings("redis", UNREACHABLE_REDIS))):
+            pass
+
+
+def test_single_worker_with_unreachable_redis_degrades_and_health_tells_truth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Один процесс — откат допустим, но /health показывает фактическое хранилище."""
+    monkeypatch.setenv("WEB_CONCURRENCY", "1")
+    monkeypatch.setenv("PDGUARD_STORE_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+    with TestClient(create_app(_settings("redis", UNREACHABLE_REDIS))) as client:
+        body = client.get("/health").json()
+        assert body["store_backend"] == "memory"
+        assert body["store_configured"] == "redis"
+        assert body["workers"] == 1
 
 
 def test_multiple_workers_with_memory_store_refuse_to_start(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -8,9 +8,9 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
-from pdguard.api import admin, ops, process
+from pdguard.api import admin, demo, ops, process
 from pdguard.api.deps import AppState
 from pdguard.core.pipeline import MaskingPipeline
 from pdguard.core.store import Cipher, MemoryStore, build_store
@@ -140,6 +140,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(process.router, tags=["process"])
     app.include_router(ops.router, tags=["ops"])
     app.include_router(admin.router, tags=["admin"])
+    app.include_router(demo.router)
+
+    @app.get("/", include_in_schema=False)
+    async def root():
+        """Корень ведёт на демо-страницу: жюри не должно искать /docs."""
+        return RedirectResponse("/demo", status_code=307)
+
     return app
 
 

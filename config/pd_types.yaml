@@ -1,0 +1,82 @@
+# Справочник типов персональных данных.
+#
+# Добавление нового типа = запись в этом файле + (при необходимости)
+# регулярное выражение в custom_patterns. Ядро не меняется.
+#
+# partial.head / partial.tail — сколько значащих символов оставить видимыми
+# в режиме маскирования `partial`.
+
+types:
+  fio:
+    title: ФИО
+    partial: {head: 0, tail: 0}   # спецобработчик: инициалы «И. И. И.»
+  birth_date:
+    title: Дата рождения
+    partial: {head: 0, tail: 0}
+  birth_place:
+    title: Место рождения
+    partial: {head: 0, tail: 0}
+  passport_rf:
+    title: Серия и номер паспорта РФ
+    partial: {head: 2, tail: 2}
+  citizenship:
+    title: Гражданство
+    partial: {head: 0, tail: 0}
+  passport_issuer:
+    title: Орган, выдавший паспорт
+    partial: {head: 0, tail: 0}
+  department_code:
+    title: Код подразделения
+    partial: {head: 0, tail: 0}
+  passport_issue_date:
+    title: Дата выдачи паспорта
+    partial: {head: 0, tail: 0}
+  driver_license:
+    title: Серия и номер водительского удостоверения
+    partial: {head: 2, tail: 2}
+  address:
+    title: Адрес
+    partial: {head: 0, tail: 0}
+  email:
+    title: Email
+    partial: {head: 1, tail: 0}
+  phone:
+    title: Номер телефона
+    partial: {head: 2, tail: 2}
+  inn:
+    title: ИНН
+    partial: {head: 2, tail: 2}
+  card_number:
+    title: Номер платёжной карты
+    partial: {head: 4, tail: 4}
+  cvv:
+    title: CVV/CVC-код
+    partial: {head: 0, tail: 0}
+  pin:
+    title: ПИН-код карты
+    partial: {head: 0, tail: 0}
+  card_holder:
+    title: Имя держателя карты
+    partial: {head: 0, tail: 0}
+
+  # --- Расширения сверх обязательного перечня ---
+  snils:
+    title: СНИЛС
+    partial: {head: 0, tail: 2}
+  foreign_passport:
+    title: Заграничный паспорт
+    partial: {head: 2, tail: 2}
+  bank_account:
+    title: Номер банковского счёта
+    partial: {head: 4, tail: 4}
+  date_generic:
+    title: Дата без контекста
+    partial: {head: 0, tail: 0}
+
+# Пользовательские типы: регулярное выражение + необязательные слова-маркеры.
+# Пример показывает, как добавить тип, не трогая код ядра.
+custom_patterns:
+  foreign_passport:
+    pattern: '(?<![\d])\d{2}\s?\d{7}(?![\d])'
+    markers: [загранпаспорт, заграничный паспорт, international passport]
+    confidence: 0.9

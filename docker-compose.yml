@@ -1,0 +1,44 @@
+# Демо-конфигурация: сервис + Redis для общего хранилища соответствий.
+#
+# Redis нужен, как только воркеров больше одного: прямой и обратный запрос
+# по одному payload_id могут попасть в разные процессы.
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  pdguard:
+    build: .
+    ports:
+      - "8000:8000"
+    # Секреты для LLM (PDGUARD_LLM_URL/KEY/MODEL) берутся из локального .env.
+    # Файл не обязателен: без него цепочка работает на заглушке.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Сертификат Russian Trusted CA для AlfaGen — только для LLM-клиента.
+      PDGUARD_LLM_CA_BUNDLE: /app/certs/ca-bundle.pem
+      # Демо-цепочка ждёт модель до минуты: гейтвей отвечает от 7 до 30 с.
+      PDGUARD_LLM_TIMEOUT: "60"
+      PDGUARD_STORE_BACKEND: redis
+      PDGUARD_REDIS_URL: redis://redis:6379/0
+      PDGUARD_STORE_TTL: "900"
+      PDGUARD_LOG_LEVEL: INFO
+      PDGUARD_LOG_FORMAT: json
+      # Ключ шифрования хранилища — ОБЯЗАТЕЛЕН при нескольких воркерах:
+      # он должен быть одним на все процессы, иначе запись одного воркера не
+      # расшифруется другим. Значение ниже — демонстрационное; в продуктивном
+      # контуре подаётся из секрет-хранилища, а не из compose-файла.
+      PDGUARD_STORE_KEY: "ZGVtby1vbmx5LWtleS0zMi1ieXRlcy1sb25nLTAwMDA="
+    command: ["python", "-m", "uvicorn", "pdguard.main:app",
+              "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+    depends_on:
+      redis:
+        condition: service_healthy

@@ -1,0 +1,66 @@
+# Системы-потребители, которым разрешено обращаться в модуль.
+#
+# Всё поведение модуля настраивается здесь, без правки кода:
+#   enabled            — вкл/откл доступ системы к модулю;
+#   pd_types           — какие типы ПД искать и маскировать ([all] или список);
+#   masking_strategy   — partial | full | token | synthetic;
+#   demasking_enabled  — разрешено ли системе получать обратное преобразование;
+#   combination_rules  — тип маскируется только вместе с перечисленными;
+#   token_gender_hint  — добавлять к токену ФИО род: [FIO_1:F] / [FIO_1:M],
+#                        чтобы модель писала «Уважаемая», а не «Уважаемый»;
+#   min_confidence     — порог уверенности детектора.
+#
+# Изменения применяются по POST /admin/reload без перезапуска сервиса.
+
+defaults:
+  enabled: true
+  masking_strategy: partial
+  demasking_enabled: true
+  min_confidence: 0.7
+  pd_types: [all]
+  token_gender_hint: true
+  # CVV и ПИН сами по себе не идентифицируют человека: маскируем их только
+  # в связке с номером карты (п. 6 ТЗ, «дополнительные плюсы»).
+  combination_rules:
+    cvv: [card_number]
+    pin: [card_number]
+
+systems:
+  # Основной потребитель: чат AlfaGen. Токенизация — чтобы модель видела
+  # осмысленные плейсхолдеры, а не обрывки цифр.
+  - id: alfagen-chat
+    name: AlfaGen Chat
+    api_key: demo-key-alfagen-chat
+    enabled: true
+    masking_strategy: token
+    demasking_enabled: true
+    pd_types: [all]
+
+  # Контур нагрузочного тестирования и жюри: формат маски совпадает с
+  # примером из контракта («45** ****56»).
+  - id: loadtest
+    name: Нагрузочное тестирование / жюри
+    api_key: demo-key-loadtest
+    enabled: true
+    masking_strategy: partial
+    demasking_enabled: true
+    pd_types: [all]
+
+  # Аналитическая песочница: демаскирование запрещено, данные заменяются
+  # синтетикой — аналитик работает с реалистичным, но обезличенным текстом.
+  - id: analytics-sandbox
+    name: Аналитическая песочница
+    api_key: demo-key-analytics
+    enabled: true
+    masking_strategy: synthetic
+    demasking_enabled: false
+    pd_types: [fio, phone, email, address, birth_date, inn, card_number]
+
+  # Пример отключённой системы: запросы отклоняются с 403.
+  - id: legacy-crm
+    name: Legacy CRM (доступ отозван)
+    api_key: demo-key-legacy
+    enabled: false
+    masking_strategy: full
+    demasking_enabled: false
+    pd_types: [all]

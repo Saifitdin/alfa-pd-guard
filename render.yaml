@@ -17,6 +17,17 @@ services:
         value: json
       - key: PDGUARD_LLM_TIMEOUT
         value: "60"
+      # Масштабирование до 1000 RPS: план standard (2+ vCPU), Key Value (Redis)
+      # и несколько воркеров. Замеры на starter упираются в ~350 RPS — см. README.
+      #   plan: standard
+      #   - key: WEB_CONCURRENCY
+      #     value: "2"
+      #   - key: PDGUARD_STORE_BACKEND
+      #     value: redis
+      #   - key: PDGUARD_REDIS_URL
+      #     fromService: {type: keyvalue, name: alfa-pd-guard-kv, property: connectionString}
+      #   - key: PDGUARD_STORE_KEY
+      #     generateValue: true
       # Ключ AlfaGen задаётся в панели Render как секрет, не в репозитории.
       - key: PDGUARD_LLM_URL
         sync: false

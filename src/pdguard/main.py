@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
@@ -28,6 +29,7 @@ async def lifespan(app: FastAPI):
     configure_logging(settings.log_level, settings.log_format)
 
     pipeline = MaskingPipeline(settings.config_dir, settings.data_dir)
+    _refuse_multiworker_memory_store(settings)
     # Общее хранилище означает несколько процессов: эфемерный ключ там
     # недопустим, иначе воркеры не прочитают записи друг друга.
     cipher = Cipher(allow_ephemeral=settings.store_backend != "redis")
@@ -50,6 +52,28 @@ async def lifespan(app: FastAPI):
     finally:
         sweeper.cancel()
         await store.close()
+
+
+def _refuse_multiworker_memory_store(settings: Settings) -> None:
+    """Несколько воркеров с хранилищем в памяти ломают демаскирование молча.
+
+    Uvicorn берёт число воркеров из WEB_CONCURRENCY — именно так масштабируют
+    сервис на Render и в Kubernetes. Прямой и обратный запрос по одному
+    payload_id попадут в разные процессы, и обратный вернёт не то, причём без
+    единой ошибки в логах. Лучше отказать на старте с понятным объяснением.
+    """
+    raw = os.getenv("WEB_CONCURRENCY", "1")
+    try:
+        workers = int(raw)
+    except ValueError:
+        workers = 1
+    if workers > 1 and settings.store_backend == "memory":
+        raise RuntimeError(
+            f"WEB_CONCURRENCY={workers}, а PDGUARD_STORE_BACKEND=memory: воркеры не "
+            "видят записи друг друга, демаскирование будет возвращать чужие или пустые "
+            "результаты. Задайте PDGUARD_STORE_BACKEND=redis, PDGUARD_REDIS_URL и общий "
+            "PDGUARD_STORE_KEY, либо оставьте один воркер."
+        )
 
 
 async def _sweep_loop(store) -> None:

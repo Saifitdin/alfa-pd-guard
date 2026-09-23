@@ -1,0 +1,26 @@
+# Blueprint для Render: New → Blueprint → выбрать этот репозиторий.
+#
+# Один воркер с хранилищем в памяти: демаскирование по payload_id корректно
+# без Redis, пока процесс один. Для нескольких инстансов нужен Redis и общий
+# PDGUARD_STORE_KEY — см. docker-compose.yml.
+services:
+  - type: web
+    name: alfa-pd-guard
+    runtime: docker
+    plan: starter
+    region: frankfurt
+    healthCheckPath: /health
+    envVars:
+      - key: PDGUARD_STORE_BACKEND
+        value: memory
+      - key: PDGUARD_LOG_FORMAT
+        value: json
+      - key: PDGUARD_LLM_TIMEOUT
+        value: "60"
+      # Ключ AlfaGen задаётся в панели Render как секрет, не в репозитории.
+      - key: PDGUARD_LLM_URL
+        sync: false
+      - key: PDGUARD_LLM_KEY
+        sync: false
+      - key: PDGUARD_LLM_MODEL
+        sync: false

@@ -148,3 +148,16 @@ def test_pool_size_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
     store = RedisStore(Cipher(), "redis://127.0.0.1:1/0")
 
     assert store._client.connection_pool.max_connections == 12  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_fallback_reason_is_visible(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Снаружи «memory вместо redis» одинаково для опечатки в адресе, мёртвого
+    инстанса и закрытого порта — причину надо показывать, иначе диагностика
+    упирается в логи платформы."""
+    from pdguard.core.store import build_store
+
+    monkeypatch.setenv("PDGUARD_STORE_KEY", KEY)
+    store = await build_store("redis", Cipher(), 900, "redis://127.0.0.1:1/0")
+
+    assert store.fallback_reason and "Error" in store.fallback_reason

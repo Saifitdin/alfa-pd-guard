@@ -190,6 +190,8 @@ class MemoryStore(MappingStore):
         self._ttl = ttl_seconds
         self._max = max_items
         self._items: OrderedDict[str, tuple[float, bytes]] = OrderedDict()
+        #: Заполняется build_store, если сюда откатились с Redis.
+        self.fallback_reason: str | None = None
 
     async def put(self, payload_id: str, record: MappingRecord) -> None:
         blob = self._cipher.encrypt(record.to_json())
@@ -362,4 +364,9 @@ async def build_store(
             return store
         except Exception as exc:  # noqa: BLE001 - деградация вместо отказа
             log.error("Redis недоступен (%s), работаем на памяти одного процесса", exc)
+            fallback = MemoryStore(cipher, ttl_seconds)
+            # Причину видно в /health: разбирать это по логам платформы долго,
+            # а снаружи «memory вместо redis» выглядит одинаково для всех причин.
+            fallback.fallback_reason = f"{type(exc).__name__}: {exc}"[:200]
+            return fallback
     return MemoryStore(cipher, ttl_seconds)

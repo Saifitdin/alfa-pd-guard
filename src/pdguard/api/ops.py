@@ -21,6 +21,7 @@ def health(request: Request) -> dict[str, object]:
         "store_backend": effective_backend(state.store),
         "store_configured": state.settings.store_backend,
         "store_degraded": getattr(state.store, "degraded", False),
+        "store_error": getattr(state.store, "fallback_reason", None),
         "workers": worker_count(),
         "store_items": state.store.size(),
         "systems": len(state.pipeline.policies.all_systems()),

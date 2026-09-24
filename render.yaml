@@ -20,11 +20,14 @@ services:
         value: "4"
       - key: PDGUARD_STORE_BACKEND
         value: redis
+      # Внутренний адрес Key Value прописан явно, а не через fromService:
+      # на синхронизации Blueprint подставлял значение, до которого сервис не
+      # достучался, и каждый пуш ронял общее хранилище в локальную память.
+      # Адрес виден на странице инстанса как Internal Key Value URL; он живёт
+      # только в приватной сети Render, снаружи инстанс закрыт.
+      # Если Key Value пересоздадут — поменять здесь.
       - key: PDGUARD_REDIS_URL
-        fromService:
-          type: keyvalue
-          name: alfa-pd-guard-kv
-          property: connectionString
+        value: redis://red-daq4rp3ncjis73am57s0:6379
       # Общий ключ AES-GCM для всех воркеров: base64 ровно на 32 байта.
       # Сгенерировать и вставить в панели Render:
       #   python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"

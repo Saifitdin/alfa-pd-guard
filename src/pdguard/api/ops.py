@@ -20,6 +20,7 @@ def health(request: Request) -> dict[str, object]:
         # Фактическое хранилище, а не настроенное: откат на память виден снаружи.
         "store_backend": effective_backend(state.store),
         "store_configured": state.settings.store_backend,
+        "store_degraded": getattr(state.store, "degraded", False),
         "workers": worker_count(),
         "store_items": state.store.size(),
         "systems": len(state.pipeline.policies.all_systems()),

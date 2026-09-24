@@ -19,15 +19,27 @@ def _settings(backend: str, redis_url: str | None = None) -> Settings:
                     log_format="plain", store_backend=backend, redis_url=redis_url)
 
 
-def test_multiple_workers_with_unreachable_redis_refuse_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Настроен Redis, но он недоступен: откат на память в каждом воркере дал бы
-    те же чужие результаты — на четырёх воркерах три четверти восстановлений
-    возвращали маску. Отказ на старте вместо этого."""
+def test_multiple_workers_with_unreachable_redis_start_degraded_and_loud(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Недоступный Redis — авария времени работы, а не ошибка конфигурации.
+
+    Отказать в старте здесь значит положить стенд целиком из-за внешнего
+    сервиса. Поднимаемся деградировавшими, но пишем ошибку в лог и признаёмся
+    в /health.
+    """
     monkeypatch.setenv("WEB_CONCURRENCY", "4")
     monkeypatch.setenv("PDGUARD_STORE_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-    with pytest.raises(RuntimeError, match="Redis по PDGUARD_REDIS_URL недоступен"):
-        with TestClient(create_app(_settings("redis", UNREACHABLE_REDIS))):
-            pass
+    with TestClient(create_app(_settings("redis", UNREACHABLE_REDIS))) as client:
+        body = client.get("/health").json()
+
+    assert body["store_backend"] == "memory"
+    assert body["store_configured"] == "redis"
+    assert body["workers"] == 4
+    # Лог читаем из вывода: configure_logging ставит свой обработчик уже внутри
+    # lifespan и гасит propagate, поэтому caplog эти строки не видит.
+    logged = capsys.readouterr()
+    assert "Redis" in logged.out + logged.err
 
 
 def test_single_worker_with_unreachable_redis_degrades_and_health_tells_truth(

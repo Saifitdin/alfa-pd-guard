@@ -33,9 +33,16 @@ async def lifespan(app: FastAPI):
     # недопустим, иначе воркеры не прочитают записи друг друга.
     cipher = Cipher(allow_ephemeral=settings.store_backend != "redis")
     store = await build_store(settings.store_backend, cipher, settings.store_ttl_seconds, settings.redis_url)
-    # build_store при недоступном Redis откатывается на память — для одного
-    # процесса это допустимо, для нескольких превращается в ту же тихую порчу.
-    _refuse_multiworker_memory_store(effective_backend(store), configured=settings.store_backend)
+    # build_store при недоступном Redis откатывается на память. Отказывать в
+    # старте здесь нельзя: недоступность Redis — это авария времени работы, и
+    # упавший наглухо сервис хуже деградировавшего. Предупреждаем громко.
+    if worker_count() > 1 and effective_backend(store) == "memory":
+        log.error(
+            "Redis по PDGUARD_REDIS_URL недоступен, воркеры работают на своей памяти: "
+            "демаскирование сработает только если обе половины пары попали в один "
+            "процесс. Почините Redis или оставьте один воркер.",
+            extra={"workers": worker_count()},
+        )
 
     app.state.pdguard = AppState(settings=settings, pipeline=pipeline, store=store)
     log.info(
@@ -68,15 +75,8 @@ def _refuse_multiworker_memory_store(backend: str, *, configured: str) -> None:
     второй раз ловит откат на память при недоступном Redis.
     """
     workers = worker_count()
-    if workers <= 1 or backend != "memory":
+    if workers <= 1 or backend != "memory" or configured == "redis":
         return
-    if configured == "redis":
-        raise RuntimeError(
-            f"WEB_CONCURRENCY={workers}, а Redis по PDGUARD_REDIS_URL недоступен: откат на "
-            "память одного процесса допустим только для одного воркера, иначе демаскирование "
-            "будет возвращать чужие или пустые результаты. Проверьте адрес Redis или "
-            "оставьте один воркер."
-        )
     raise RuntimeError(
         f"WEB_CONCURRENCY={workers}, а PDGUARD_STORE_BACKEND=memory: воркеры не "
         "видят записи друг друга, демаскирование будет возвращать чужие или пустые "

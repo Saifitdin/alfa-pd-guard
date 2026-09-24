@@ -125,3 +125,26 @@ def test_client_is_configured_against_stale_pooled_connections(
 
     assert pool.connection_kwargs["health_check_interval"] == 30
     assert pool.connection_kwargs["retry"].get_retries() == 2
+
+
+def test_connection_pool_is_bounded_and_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Без верхней границы пул под нагрузкой выбирает лимит соединений
+    инстанса Key Value, и дальше падает каждая команда: на прогоне 8×128 это
+    дало 21 % несовпадений при восстановлении."""
+    from redis.asyncio import BlockingConnectionPool
+
+    monkeypatch.setenv("PDGUARD_STORE_KEY", KEY)
+    store = RedisStore(Cipher(), "redis://127.0.0.1:1/0")
+    pool = store._client.connection_pool  # noqa: SLF001
+
+    assert isinstance(pool, BlockingConnectionPool), "переполненный пул должен ждать, а не падать"
+    assert pool.max_connections == RedisStore.DEFAULT_MAX_CONNECTIONS
+    assert RedisStore.DEFAULT_MAX_CONNECTIONS * 4 < 250, "4 воркера должны влезать в лимит starter"
+
+
+def test_pool_size_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PDGUARD_STORE_KEY", KEY)
+    monkeypatch.setenv("PDGUARD_REDIS_MAX_CONNECTIONS", "12")
+    store = RedisStore(Cipher(), "redis://127.0.0.1:1/0")
+
+    assert store._client.connection_pool.max_connections == 12  # noqa: SLF001

@@ -52,6 +52,18 @@ class MappingRecord:
         return MappingRecord(data["o"], data["m"], data["p"], data["s"])
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        log.warning("%s=%r — не целое, беру %d", name, raw, default)
+        return default
+    return value if value > 0 else default
+
+
 class SharedKeyRequired(RuntimeError):
     """Общее хранилище требует общего ключа шифрования."""
 
@@ -217,8 +229,23 @@ class RedisStore(MappingStore):
     демаскирование вернёт не то.
     """
 
-    def __init__(self, cipher: Cipher, url: str, ttl_seconds: int = 900, prefix: str = "pdg:") -> None:
-        from redis import asyncio as aioredis
+    #: Соединений к Redis на воркер. У Key Value на Render лимит на инстанс
+    #: (250 на тарифе starter), и пул, растущий по числу одновременных
+    #: запросов, упирается в него под нагрузкой: 4 воркера × сколько угодно.
+    #: Дальше каждая команда падает с ConnectionError, хранилище деградирует
+    #: на локальную память — и демаскирование начинает промахиваться. Лучше
+    #: ждать свободное соединение: сама операция занимает доли миллисекунды.
+    DEFAULT_MAX_CONNECTIONS = 40
+
+    def __init__(
+        self,
+        cipher: Cipher,
+        url: str,
+        ttl_seconds: int = 900,
+        prefix: str = "pdg:",
+        max_connections: int | None = None,
+    ) -> None:
+        from redis.asyncio import BlockingConnectionPool, Redis
         from redis.asyncio.retry import Retry
         from redis.backoff import ExponentialBackoff
 
@@ -229,8 +256,12 @@ class RedisStore(MappingStore):
         # Локальная подстраховка на время недоступности Redis: см. _degrade.
         self._fallback = MemoryStore(cipher, ttl_seconds)
         self._degraded = False
-        self._client = aioredis.Redis.from_url(
+        if max_connections is None:
+            max_connections = _env_int("PDGUARD_REDIS_MAX_CONNECTIONS", self.DEFAULT_MAX_CONNECTIONS)
+        pool = BlockingConnectionPool.from_url(
             url,
+            max_connections=max_connections,
+            timeout=2,  # столько ждём свободное соединение, потом честная ошибка
             socket_timeout=1.0,
             socket_connect_timeout=1.0,
             # Соединение из пула, которое сервер закрыл по простою, иначе
@@ -241,6 +272,7 @@ class RedisStore(MappingStore):
             retry=Retry(ExponentialBackoff(cap=0.2, base=0.01), retries=2),
             retry_on_error=[RedisConnectionError, RedisTimeoutError],
         )
+        self._client = Redis(connection_pool=pool)
 
     def _degrade(self, exc: Exception) -> None:
         """Redis отвалился: продолжаем на локальной памяти, но громко.
